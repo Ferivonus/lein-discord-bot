@@ -1,0 +1,18 @@
+[package]
+name = "my_discord_bot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+log = "0.4.22"
+serenity = { version = "0.12.2", features = [
+    "client",
+    "gateway",
+    "rustls_backend",
+] }
+sqlx = { version = "0.7.4", features = ["mysql", "runtime-tokio-rustls"] }
+tokio = { version = "1.38.0", features = ["full"] }
+dotenv = "0.15"
+async-trait = "0.1.81"
+
+[features]

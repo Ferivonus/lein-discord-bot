@@ -3,12 +3,13 @@
 use dotenv::dotenv;
 use serenity::all::standard::Configuration;
 use serenity::async_trait;
-use serenity::builder::{CreateAttachment, CreateEmbed, CreateEmbedFooter, CreateMessage};
-use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
-use serenity::model::Timestamp;
+use serenity::model::id::GuildId;
 use serenity::prelude::EventHandler;
 use serenity::prelude::*;
+
+use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseMessage};
+use serenity::model::application::Interaction;
 
 use sqlx::MySqlPool;
 use std::env;
@@ -44,8 +45,55 @@ struct General;
 
 #[async_trait]
 impl EventHandler for Bot {
-    async fn ready(&self, _: Context, ready: Ready) {
+    async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
+        if let Interaction::Command(command) = interaction {
+            println!("Received command interaction: {command:#?}");
+
+            let content = match command.data.name.as_str() {
+                "help" => Some(commands::help::help_run(&command.data.options())),
+                "id" => Some(commands::id::id_run(&command.data.options())),
+                _ => Some("not implemented :(".to_string()),
+            };
+
+            if let Some(content) = content {
+                let data = CreateInteractionResponseMessage::new().content(content);
+                let builder = CreateInteractionResponse::Message(data);
+                if let Err(why) = command.create_response(&ctx.http, builder).await {
+                    println!("Cannot respond to slash command: {why}");
+                }
+            }
+        }
+    }
+
+    async fn ready(&self, ctx: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
+
+        let guild_id = GuildId::new(
+            env::var("GUILD_ID")
+                .expect("Expected GUILD_ID in environment")
+                .parse()
+                .expect("GUILD_ID must be an integer"),
+        );
+
+        // Register standard commands for your guild
+        // You can register multiple commands here as needed
+        let commands = guild_id
+            .set_commands(
+                &ctx.http,
+                vec![
+                    commands::help::help_register(),
+                    commands::id::id_register(),
+                    commands::wonderful_command::wonderful_register(),
+                ],
+            )
+            .await;
+
+        println!("I now have the following guild commands: {commands:#?}");
+
+        // Optionally, register global commands
+        // Command::create_global_command can be used similarly here if needed
+
+        println!("Ready to receive commands!");
     }
 
     async fn resume(&self, _: Context, _: ResumedEvent) {
@@ -84,7 +132,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Create the framework
     let framework = StandardFramework::new().group(&GENERAL_GROUP);
-    framework.configure(Configuration::new().owners(owners).prefix("--"));
+    framework.configure(Configuration::new().owners(owners).prefix("~"));
 
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::DIRECT_MESSAGES

@@ -52,6 +52,22 @@ impl EventHandler for Bot {
             let content = match command.data.name.as_str() {
                 "help" => Some(commands::help::help_run(&command.data.options())),
                 "id" => Some(commands::id::id_run(&command.data.options())),
+                "send_message" => {
+                    let response = commands::send_private_messages::send_to_channel_run(
+                        &command.data.options(),
+                        &ctx,
+                    )
+                    .await;
+                    Some(response)
+                }
+                "send_a_message_to_a_user" => {
+                    let response = commands::send_private_messages::send_to_user_by_user_id_run(
+                        &command.data.options(),
+                        &ctx,
+                    )
+                    .await;
+                    Some(response)
+                }
                 _ => Some("not implemented :(".to_string()),
             };
 
@@ -84,6 +100,8 @@ impl EventHandler for Bot {
                     commands::help::help_register(),
                     commands::id::id_register(),
                     commands::wonderful_command::wonderful_register(),
+                    commands::send_private_messages::send_to_channel_register(),
+                    commands::send_private_messages::send_to_user_by_user_id_register(),
                 ],
             )
             .await;
@@ -132,7 +150,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Create the framework
     let framework = StandardFramework::new().group(&GENERAL_GROUP);
-    framework.configure(Configuration::new().owners(owners).prefix("~"));
+    framework.configure(Configuration::new().owners(owners).prefix("--"));
 
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::DIRECT_MESSAGES

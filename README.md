@@ -1,1 +1,1 @@
-# Rust Lein discord bot.
+# Rust Lein discord bot

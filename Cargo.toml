@@ -9,6 +9,7 @@ serenity = { version = "0.12.2", features = [
     "client",
     "gateway",
     "rustls_backend",
+    "model",
 ] }
 sqlx = { version = "0.7.4", features = ["mysql", "runtime-tokio-rustls"] }
 tokio = { version = "1.38.0", features = ["full"] }

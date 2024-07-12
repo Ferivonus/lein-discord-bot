@@ -1,91 +1,64 @@
+#![allow(deprecated)] // We recommend migrating to poise, instead of using the standard command framework.
+
 use dotenv::dotenv;
+use serenity::all::standard::Configuration;
 use serenity::async_trait;
 use serenity::builder::{CreateAttachment, CreateEmbed, CreateEmbedFooter, CreateMessage};
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::model::Timestamp;
+use serenity::prelude::EventHandler;
 use serenity::prelude::*;
 
 use sqlx::MySqlPool;
 use std::env;
 use std::error::Error;
 
+mod commands;
+
+use std::collections::HashSet;
+use std::sync::Arc;
+use tracing_subscriber;
+
+use serenity::framework::standard::macros::group;
+use serenity::framework::StandardFramework;
+use serenity::gateway::ShardManager;
+use serenity::http::Http;
+use serenity::model::event::ResumedEvent;
+
+use crate::commands::math::*;
+use crate::commands::meta::*;
+use crate::commands::owner::*;
+
+pub struct ShardManagerContainer;
+
+impl TypeMapKey for ShardManagerContainer {
+    type Value = Arc<ShardManager>;
+}
+
 struct Bot;
+
+#[group]
+#[commands(ping, hello, dm, orkun, ender, multiply, quit)]
+struct General;
 
 #[async_trait]
 impl EventHandler for Bot {
-    async fn message(&self, ctx: Context, msg: Message) {
-        if msg.content == "!hello" {
-            if let Err(e) = msg.channel_id.say(&ctx.http, "world!").await {
-                println!("Error sending message: {:?}", e);
-            }
-        }
-
-        if msg.content == "!dm" {
-            let footer = CreateEmbedFooter::new("Always connected in the Wired");
-            let embed = CreateEmbed::new()
-                .title("Greetings, I am Lain Iwakura")
-                .description("Welcome to the Wired. Are you ready to explore the depths of the digital realm?")
-                .image("attachment://Serial_Experiments_Lain_Lain.jpg")
-                .fields(vec![
-                    ("Reality vs. Wired", "Do you believe in the boundaries of reality?", true),
-                    ("Connection", "We are all interconnected in the Wired...", true),
-                    ("The Wired", "A place where thoughts become reality.", true),
-                ])
-                .field(
-                    "Question for You",
-                    "What secrets do you seek in the Wired?",
-                    false,
-                )
-                .footer(footer)
-                .timestamp(Timestamp::now());
-            let builder = CreateMessage::new()
-                .content("Hello, explorers of the Wired!")
-                .embed(embed)
-                .add_file(
-                    CreateAttachment::path("./Serial_Experiments_Lain_Lain.jpg")
-                        .await
-                        .unwrap(),
-                );
-            let msg = msg.author.dm(&ctx.http, builder).await;
-
-            if let Err(why) = msg {
-                println!("Error sending message: {why:?}");
-            }
-        }
-
-        if (msg.content == "!orkun") && (msg.author.id == 317767790029438988) {
-            let builder = CreateMessage::new().content("iyi ki varsın abi seni çok seviom!");
-            let dm = msg.author.dm(&ctx, builder).await;
-
-            if let Err(why) = dm {
-                println!("Error when direct messaging user: {why:?}");
-            }
-        }
-
-        if (msg.content == "!ender") && (msg.author.id == 305720245853880321) {
-            // If the `utils`-feature is enabled, then model structs will have a lot of useful
-            // methods implemented, to avoid using an often otherwise bulky Context, or even much
-            // lower-level `rest` method.
-            //
-            // In this case, you can direct message a User directly by simply calling a method on
-            // its instance, with the content of the message.
-            let builder = CreateMessage::new().content("iyi ki varsın gardasım seni çok seviom!");
-            let dm = msg.author.dm(&ctx, builder).await;
-
-            if let Err(why) = dm {
-                println!("Error when direct messaging user: {why:?}");
-            }
-        }
-    }
-
     async fn ready(&self, _: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
+    }
+
+    async fn resume(&self, _: Context, _: ResumedEvent) {
+        println!("Resumed");
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // Initialize the logger
+    tracing_subscriber::fmt::init();
+
+    // Load environment variables from .env file
     dotenv().ok();
     let token =
         env::var("DISCORD_TOKEN").expect("Expected a token in the environment for discord token");
@@ -95,15 +68,50 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .expect("Expected a token in the environment for mysql database url");
     let _pool = MySqlPool::connect(&database_url).await?;
 
-    // Set gateway intents, which decides what events the bot will be notified about
-    let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
+    let http = Http::new(&token);
 
+    // Fetch your bot's owners and id
+    let (owners, _bot_id) = match http.get_current_application_info().await {
+        Ok(info) => {
+            let mut owners = HashSet::new();
+            if let Some(owner) = &info.owner {
+                owners.insert(owner.id);
+            }
+            (owners, info.id)
+        }
+        Err(why) => panic!("Could not access application info: {:?}", why),
+    };
+
+    // Create the framework
+    let framework = StandardFramework::new().group(&GENERAL_GROUP);
+    framework.configure(Configuration::new().owners(owners).prefix("--"));
+
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::DIRECT_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT;
     let mut client = Client::builder(&token, intents)
+        .framework(framework)
         .event_handler(Bot)
         .await
         .expect("Error creating client");
 
-    client.start().await?;
+    {
+        let mut data = client.data.write().await;
+        data.insert::<ShardManagerContainer>(client.shard_manager.clone());
+    }
+
+    let shard_manager = client.shard_manager.clone();
+
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Could not register ctrl+c handler");
+        shard_manager.shutdown_all().await;
+    });
+
+    if let Err(why) = client.start().await {
+        println!("Client error: {:?}", why);
+    }
 
     Ok(())
 }
